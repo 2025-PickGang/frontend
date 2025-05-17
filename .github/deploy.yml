@@ -1,0 +1,59 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs: 
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm ci
+      - run: npm run build
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+  
+  docker_build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build Docker image
+        run: |
+          docker build -t pickgang-frontend .
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker tag pickgang-frontend ${{ secrets.DOCKER_USERNAME }}/pickgang-frontend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/pickgang-frontend:latest
+  
+  deploy:
+    runs-on: ubuntu-latest
+    needs: docker_build
+    steps:
+      - uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKER_USERNAME }}/pickgang-frontend:latest
+            docker stop pickgang-frontend || true
+            docker rm pickgang-frontend || true
+            docker run -d --name pickgang-frontend -p 80:80 ${{ secrets.DOCKER_USERNAME }}/pickgang-frontend:latest
+
+
+
